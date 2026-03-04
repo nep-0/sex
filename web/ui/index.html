@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sex (Simple EXpose) UI</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #0f1115;
+        color: #e5e7eb;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #9ca3af;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        margin-right: 6px;
+        border-radius: 999px;
+        background: #1f2937;
+        color: #e5e7eb;
+        font-size: 12px;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #374151;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .log {
+        background: #0b0f19;
+        border-radius: 8px;
+        border: 1px solid #1f2937;
+        padding: 8px;
+        height: 140px;
+        overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        color: #d1d5db;
+      }
+      .field {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      input, select {
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #374151;
+        background: #0b0f19;
+        color: #e5e7eb;
+      }
+      video, img {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #1f2937;
+        background: #0b0f19;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>sex (Simple EXpose) UI</h1>
+    <p>Quickly subscribe to configured streams (HTTP, SSE, WebSocket).</p>
+
+    <div class="card stack" style="margin-bottom: 16px;">
+      <div class="field">
+        <label class="mono" for="baseUrl">Base URL</label>
+        <input id="baseUrl" type="text" style="flex:1; min-width: 220px;" />
+        <button id="refreshRoutes">Refresh routes</button>
+      </div>
+      <div id="routeList" class="grid"></div>
+    </div>
+
+    <div class="card stack">
+      <h3>Manual connect</h3>
+      <div class="field">
+        <input id="manualPath" type="text" placeholder="/path" />
+        <select id="manualExpose">
+          <option value="http">http</option>
+          <option value="sse">sse</option>
+          <option value="websocket">websocket</option>
+        </select>
+        <select id="manualResource">
+          <option value="file">file</option>
+          <option value="image">image</option>
+        </select>
+        <button id="manualConnect">Connect</button>
+      </div>
+      <div id="manualOutput" class="log"></div>
+    </div>
+
+    <script>
+      const baseUrlInput = document.getElementById('baseUrl');
+      const routeList = document.getElementById('routeList');
+      const manualPath = document.getElementById('manualPath');
+      const manualExpose = document.getElementById('manualExpose');
+      const manualResource = document.getElementById('manualResource');
+      const manualOutput = document.getElementById('manualOutput');
+
+      baseUrlInput.value = window.location.origin;
+
+      document.getElementById('refreshRoutes').addEventListener('click', loadRoutes);
+      document.getElementById('manualConnect').addEventListener('click', () => {
+        manualOutput.textContent = '';
+        connectRoute({
+          path: manualPath.value,
+          expose_type: manualExpose.value,
+          resource_type: manualResource.value,
+        }, manualOutput);
+      });
+
+      async function loadRoutes() {
+        routeList.innerHTML = '';
+        try {
+          const res = await fetch(`${baseUrlInput.value}/api/routes`);
+          if (!res.ok) {
+            throw new Error(`Failed to load routes: ${res.status}`);
+          }
+          const routes = await res.json();
+          routes.forEach(route => routeList.appendChild(renderRoute(route)));
+        } catch (err) {
+          routeList.innerHTML = `<div class="card">${err.message}</div>`;
+        }
+      }
+
+      function renderRoute(route) {
+        const card = document.createElement('div');
+        card.className = 'card stack';
+        card.innerHTML = `
+          <h3>${route.path}</h3>
+          <div>
+            <span class="badge">${route.expose_type}</span>
+            <span class="badge">${route.resource_type}</span>
+            ${route.watch ? '<span class="badge">watch</span>' : ''}
+          </div>
+          <div class="mono">${route.source || ''}</div>
+          <div class="stack">
+            <button>Connect</button>
+            <div class="log"></div>
+          </div>
+        `;
+        const button = card.querySelector('button');
+        const log = card.querySelector('.log');
+        button.addEventListener('click', () => {
+          log.textContent = '';
+          connectRoute(route, log, card);
+        });
+        return card;
+      }
+
+      function appendLog(el, message) {
+        el.textContent += `${message}\n`;
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function routeUrl(path) {
+        const base = baseUrlInput.value.replace(/\/$/, '');
+        if (!path.startsWith('/')) {
+          path = `/${path}`;
+        }
+        return `${base}${path}`;
+      }
+
+      async function connectRoute(route, logEl, cardEl) {
+        const url = routeUrl(route.path);
+        switch (route.expose_type) {
+          case 'http':
+            await connectHTTP(url, route, logEl, cardEl);
+            break;
+          case 'sse':
+            connectSSE(url, logEl, cardEl, route);
+            break;
+          case 'websocket':
+            connectWebSocket(url, logEl, cardEl, route);
+            break;
+          default:
+            appendLog(logEl, `Unsupported expose_type: ${route.expose_type}`);
+        }
+      }
+
+      async function connectHTTP(url, route, logEl, cardEl) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            appendLog(logEl, `HTTP error ${res.status}`);
+            return;
+          }
+          const contentType = res.headers.get('Content-Type') || '';
+          if (contentType.startsWith('image/')) {
+            const blob = await res.blob();
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(blob);
+            cardEl?.appendChild(img);
+            appendLog(logEl, `Image loaded (${contentType})`);
+          } else {
+            const text = await res.text();
+            appendLog(logEl, text);
+          }
+        } catch (err) {
+          appendLog(logEl, err.message);
+        }
+      }
+
+      function connectSSE(url, logEl, cardEl, route) {
+        appendLog(logEl, `SSE connecting to ${url}`);
+        const es = new EventSource(url);
+        if (route.resource_type === 'image') {
+          es.addEventListener('snapshot', (event) => renderImageFromDataUrl(event.data, cardEl, logEl));
+          es.addEventListener('update', (event) => renderImageFromDataUrl(event.data, cardEl, logEl));
+        } else {
+          es.addEventListener('snapshot', (event) => appendLog(logEl, `\n[snapshot] ${event.data}`));
+          es.addEventListener('update', (event) => appendLog(logEl, `\n[update] ${event.data}`));
+        }
+        es.onerror = (err) => appendLog(logEl, `SSE error: ${err.type || err}`);
+      }
+
+      function connectWebSocket(url, logEl, cardEl, route) {
+        const wsUrl = url.replace(/^http/, 'ws');
+        appendLog(logEl, `WebSocket connecting to ${wsUrl}`);
+        const ws = new WebSocket(wsUrl);
+        if (route.resource_type === 'image') {
+          ws.binaryType = 'arraybuffer';
+        }
+        ws.onmessage = (event) => {
+          if (route.resource_type === 'image') {
+            const blob = new Blob([event.data], { type: 'image/jpeg' });
+            renderImageFromBlob(blob, cardEl, logEl);
+            return;
+          }
+          appendLog(logEl, event.data);
+        };
+        ws.onclose = () => appendLog(logEl, 'WebSocket closed');
+        ws.onerror = (err) => appendLog(logEl, `WebSocket error: ${err.type || err}`);
+      }
+
+      function renderImageFromDataUrl(dataUrl, cardEl, logEl) {
+        let img = cardEl?.querySelector('img');
+        if (!img) {
+          img = document.createElement('img');
+          cardEl?.appendChild(img);
+        }
+        img.src = dataUrl;
+        appendLog(logEl, 'Image updated');
+      }
+
+      function renderImageFromBlob(blob, cardEl, logEl) {
+        let img = cardEl?.querySelector('img');
+        if (!img) {
+          img = document.createElement('img');
+          cardEl?.appendChild(img);
+        }
+        img.src = URL.createObjectURL(blob);
+        appendLog(logEl, 'Image updated');
+      }
+
+      function waitForIce(pc) {
+        if (pc.iceGatheringState === 'complete') {
+          return Promise.resolve();
+        }
+        return new Promise(resolve => {
+          const check = () => {
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', check);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', check);
+        });
+      }
+
+      loadRoutes();
+    </script>
+  </body>
+</html>
