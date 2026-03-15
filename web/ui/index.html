@@ -276,62 +276,38 @@
         ws.onerror = (err) => appendLog(logEl, `WebSocket error: ${err.type || err}`);
       }
 
-      const imageState = new WeakMap();
-
       function renderImageFromDataUrl(dataUrl, cardEl, logEl) {
         let img = cardEl?.querySelector('img');
         if (!img) {
           img = document.createElement('img');
-          img.decoding = 'async';
           cardEl?.appendChild(img);
         }
-        scheduleImageUpdate(img, dataUrl, null);
-        appendLog(logEl, 'Image updated');
+        const pending = new Image();
+        pending.onload = () => {
+          img.src = dataUrl;
+          appendLog(logEl, 'Image updated');
+        };
+        pending.onerror = () => appendLog(logEl, 'Image load failed');
+        pending.src = dataUrl;
       }
 
       function renderImageFromBlob(blob, cardEl, logEl) {
         let img = cardEl?.querySelector('img');
         if (!img) {
           img = document.createElement('img');
-          img.decoding = 'async';
           cardEl?.appendChild(img);
         }
         const url = URL.createObjectURL(blob);
-        scheduleImageUpdate(img, url, () => URL.revokeObjectURL(url));
-        appendLog(logEl, 'Image updated');
-      }
-
-      function scheduleImageUpdate(img, nextSrc, revokeFn) {
-        const state = imageState.get(img) || { rafId: null, pendingSrc: null, revokeFn: null };
-        state.pendingSrc = nextSrc;
-        state.revokeFn = revokeFn;
-        if (state.rafId !== null) {
-          imageState.set(img, state);
-          return;
-        }
-        state.rafId = requestAnimationFrame(() => {
-          const current = imageState.get(img);
-          if (!current) return;
-          if (img.dataset.lastSrc === current.pendingSrc) {
-            current.rafId = null;
-            imageState.set(img, current);
-            if (current.revokeFn) current.revokeFn();
-            return;
-          }
-          const previousUrl = img.dataset.lastBlobUrl;
-          img.src = current.pendingSrc;
-          img.dataset.lastSrc = current.pendingSrc;
-          if (previousUrl) {
-            URL.revokeObjectURL(previousUrl);
-            img.dataset.lastBlobUrl = '';
-          }
-          if (current.revokeFn) {
-            img.dataset.lastBlobUrl = current.pendingSrc;
-          }
-          current.rafId = null;
-          imageState.set(img, current);
-        });
-        imageState.set(img, state);
+        const pending = new Image();
+        pending.onload = () => {
+          img.src = url;
+          appendLog(logEl, 'Image updated');
+        };
+        pending.onerror = () => {
+          URL.revokeObjectURL(url);
+          appendLog(logEl, 'Image load failed');
+        };
+        pending.src = url;
       }
 
       function waitForIce(pc) {
